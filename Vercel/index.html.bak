@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>XGPROF — Live Football Intelligence</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="shortcut icon" href="/favicon.svg">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -43,9 +42,7 @@
   .score-wrap { display:flex; align-items:center; gap:6px; }
   .score { font-family:'Bebas Neue',sans-serif; font-size:22px; letter-spacing:2px; color:var(--text); min-width:24px; text-align:center; }
   .score.leading { color:var(--accent); }
-  .xg-side { font-family:'DM Mono',monospace; font-size:9px; min-width:28px; text-align:right; display:none; }
-  .xg-side.higher { color:var(--accent); font-weight:600; }
-  .xg-side.lower { color:var(--accent2); }
+  .xg-side { font-family:'DM Mono',monospace; font-size:9px; color:var(--accent); min-width:28px; text-align:right; display:none; }
   .match-meta { display:flex; align-items:center; justify-content:space-between; margin-top:10px; }
   .match-time { font-family:'DM Mono',monospace; font-size:10px; color:var(--live); letter-spacing:1px; }
   .match-time.upcoming { color:var(--muted); }
@@ -128,7 +125,7 @@
 </head>
 <body>
 <header>
-  <div class="logo"><span style="font-size:18px;color:var(--accent);font-family:'DM Sans',sans-serif;font-weight:700;letter-spacing:0;text-transform:lowercase;vertical-align:middle">xG</span><span>PROF</span></div>
+  <div class="logo">XG<span>PROF</span></div>
   <nav>
     <button class="active" onclick="loadTab('live',this)">Live</button>
     <button onclick="loadTab('finished',this)">Finished</button>
@@ -258,21 +255,12 @@ async function loadMatches(tab) {
   const dateStr = formatDate(currentDate);
   let path = '';
   if (tab === 'live') path = '/matches?status=LIVE';
-  else if (tab === 'finished') path = `/matches?date=${dateStr}&status=FINISHED,PAUSED`;
+  else if (tab === 'finished') path = `/matches?date=${dateStr}&status=FINISHED`;
   else path = `/matches?date=${dateStr}&status=SCHEDULED,TIMED`;
 
   const data = await fetchFD(path);
   const listEl = document.getElementById('match-list');
-  let matches = data?.matches || [];
-  // Filter out stale PAUSED matches older than 3 hours
-  const now3h = Date.now() - (3 * 60 * 60 * 1000);
-  matches = matches.filter(m => {
-    if (m.status === 'PAUSED') {
-      const matchTime = new Date(m.lastUpdated || m.utcDate).getTime();
-      return matchTime > now3h;
-    }
-    return true;
-  });
+  const matches = data?.matches || [];
 
   if (!matches.length) {
     listEl.innerHTML = `<div class="empty-state">No ${tab} matches<br>at the moment</div>`;
@@ -355,23 +343,11 @@ async function fetchXGForMatches(matches) {
     const awayStats = stats?.response?.[1]?.statistics || [];
     const hxg = homeStats.find(s => s.type === 'expected_goals')?.value;
     const axg = awayStats.find(s => s.type === 'expected_goals')?.value;
-    if (hxg != null && axg != null) {
-      const hVal = parseFloat(hxg);
-      const aVal = parseFloat(axg);
-      if (hVal > 0 || aVal > 0) {
-        const hEl = document.getElementById(`xgh-${m.id}`);
-        const aEl = document.getElementById(`xga-${m.id}`);
-        if (hEl) {
-          hEl.textContent = hVal.toFixed(2);
-          hEl.className = 'xg-side ' + (hVal >= aVal ? 'higher' : 'lower');
-          hEl.style.display = 'inline';
-        }
-        if (aEl) {
-          aEl.textContent = aVal.toFixed(2);
-          aEl.className = 'xg-side ' + (aVal >= hVal ? 'higher' : 'lower');
-          aEl.style.display = 'inline';
-        }
-      }
+    if (hxg != null && axg != null && hxg !== '0' && axg !== '0') {
+      const hEl = document.getElementById(`xgh-${m.id}`);
+      const aEl = document.getElementById(`xga-${m.id}`);
+      if (hEl) { hEl.textContent = parseFloat(hxg).toFixed(2); hEl.style.display = 'inline'; }
+      if (aEl) { aEl.textContent = parseFloat(axg).toFixed(2); aEl.style.display = 'inline'; }
     }
   }
 }
@@ -379,7 +355,6 @@ async function fetchXGForMatches(matches) {
 async function selectMatch(el, matchId, leagueCode) {
   document.querySelectorAll('.match-card').forEach(c => c.classList.remove('selected'));
   el.classList.add('selected');
-  selectedLeagueCode = leagueCode;
   const centerPanel = document.getElementById('center-panel');
   centerPanel.innerHTML = '<div class="loading"><div class="spinner"></div>Loading match details...</div>';
 
@@ -389,8 +364,6 @@ async function selectMatch(el, matchId, leagueCode) {
     centerPanel.innerHTML = '<div class="empty-state">Could not load match details</div>';
     return;
   }
-  selectedMatchData = m;
-  selectedMatchData.id = matchId;
 
   const home = m.homeTeam?.name || 'Home';
   const away = m.awayTeam?.name || 'Away';
@@ -618,28 +591,14 @@ async function loadStandings() {
 }
 
 let refreshInterval;
-let xgRefreshInterval;
 function startAutoRefresh() {
   clearInterval(refreshInterval);
-  clearInterval(xgRefreshInterval);
-  if (currentTab==='live') {
-    refreshInterval = setInterval(()=>loadMatches('live'), 60000);
-  }
+  if (currentTab==='live') refreshInterval = setInterval(()=>loadMatches('live'), 60000);
 }
 
 loadMatches('live');
 setTimeout(() => loadStandings(), 3000);
 startAutoRefresh();
-
-// Auto-refresh xG for selected match every 2 minutes
-let selectedMatchData = null;
-let selectedLeagueCode = null;
-setInterval(() => {
-  if (selectedMatchData && currentTab === 'live') {
-    fetchMatchXG(selectedMatchData.id, selectedMatchData, 
-      selectedMatchData.homeTeam?.name, selectedMatchData.awayTeam?.name);
-  }
-}, 120000);
 </script>
 </body>
 </html>
