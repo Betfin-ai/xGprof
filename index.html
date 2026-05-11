@@ -288,30 +288,44 @@ async function loadTab(tab, btn) {
   document.getElementById('match-count').textContent='';
   clearInterval(liveRefresh);
   await loadMatches(tab);
-  if(tab==='live') liveRefresh=setInterval(()=>loadMatches('live'),60000);
+  if(tab==='live') liveRefresh=setInterval(()=>loadMatches('live', true),60000);
 }
 
-async function loadMatches(tab) {
+async function loadMatches(tab, silent=false) {
   const dateStr = formatDate(currentDate);
   let endpoint = '';
   if(tab==='live') endpoint='/fixtures?live=all';
   else if(tab==='finished') endpoint=`/fixtures?date=${dateStr}&status=FT`;
-  else endpoint=`/fixtures?date=${dateStr}&status=NS`; // Only NS for upcoming
+  else endpoint=`/fixtures?date=${dateStr}&status=NS`;
 
   const data = await fetchAF(endpoint);
-  allFixtures = data?.response || [];
+  const newFixtures = data?.response || [];
 
   document.getElementById('api-status').innerHTML=`API-Football <b style="color:var(--accent)">✓</b>`;
-  document.getElementById('match-count').textContent=allFixtures.length;
+  document.getElementById('match-count').textContent=newFixtures.length;
 
-  if(!allFixtures.length) {
-    document.getElementById('match-list').innerHTML=`<div class="empty-state">No ${tab} matches<br>at the moment</div>`;
+  if(!newFixtures.length) {
+    if(!silent) document.getElementById('match-list').innerHTML=`<div class="empty-state">No ${tab} matches<br>at the moment</div>`;
     return;
   }
 
-  xgData = {};
+  if(silent && allFixtures.length > 0) {
+    // Silent update: just update scores without re-rendering
+    allFixtures = newFixtures;
+    newFixtures.forEach(f => {
+      const hEl = document.querySelector(`[data-id="${f.fixture.id}"] .team-row:first-child .score`);
+      const aEl = document.querySelector(`[data-id="${f.fixture.id}"] .team-row:last-child .score`);
+      const tEl = document.querySelector(`[data-id="${f.fixture.id}"] .match-time`);
+      if(hEl) { hEl.textContent = f.goals.home ?? '—'; hEl.className = 'score ' + ((f.goals.home??0)>(f.goals.away??0)?'win':''); }
+      if(aEl) { aEl.textContent = f.goals.away ?? '—'; aEl.className = 'score ' + ((f.goals.away??0)>(f.goals.home??0)?'win':''); }
+      if(tEl) { tEl.textContent = f.fixture.status.elapsed ? `${f.fixture.status.elapsed}'` : f.fixture.status.short; }
+    });
+    return;
+  }
+
+  allFixtures = newFixtures;
+  if(!silent) xgData = {};
   renderMatches();
-  // Only fetch xG for live and finished (not upcoming - saves requests)
   if(tab !== 'upcoming') fetchAllXG(allFixtures);
 }
 
@@ -469,7 +483,7 @@ async function loadMatchDetail(fixtureId) {
       <div class="event-detail"><div class="event-player">${ev.player?.name||''}</div>
       <div class="event-type">${d}${ev.assist?.name?' · '+ev.assist.name:''}</div></div>
       <div class="event-team">
-        ${ev.team?.logo ? `<img src="${ev.team.logo}" style="width:16px;height:16px;object-fit:contain" alt="">` : (ev.team?.name||'').substring(0,3).toUpperCase()}
+        ${ev.team?.logo ? `<img src="${ev.team.logo}" style="width:20px;height:20px;object-fit:contain" alt="">` : (ev.team?.name||'').substring(0,3).toUpperCase()}
       </div>
     </div>`;
   }).join(''):'<div class="empty-state" style="padding:8px 0">No events yet</div>';
@@ -489,38 +503,48 @@ async function loadMatchDetail(fixtureId) {
       </div>
     </div>`:'';
 
-  // Extract attacks
-  const hAtk = getStat(hS,'Attacks'); const aAtk = getStat(aS,'Attacks');
-  const hDng = getStat(hS,'Dangerous Attacks'); const aDng = getStat(aS,'Dangerous Attacks');
+  // Extract extra stats
+  const hInsideBox = getStat(hS,'Shots insidebox'); const aInsideBox = getStat(aS,'Shots insidebox');
+  const hOutsideBox = getStat(hS,'Shots outsidebox'); const aOutsideBox = getStat(aS,'Shots outsidebox');
+  const hPassPct = getStat(hS,'Passes %'); const aPassPct = getStat(aS,'Passes %');
+  const hGoalsPrev = getStat(hS,'goals_prevented'); const aGoalsPrev = getStat(aS,'goals_prevented');
+  const hFouls = getStat(hS,'Fouls'); const aFouls = getStat(aS,'Fouls');
 
-  function attackBar(hVal, aVal, label, homeLogoUrl, awayLogoUrl) {
-    const h = parseInt(hVal)||0, a = parseInt(aVal)||0;
+  function statBar(hVal, aVal, label, isPercent=false, invertColors=false) {
+    const h = parseFloat(hVal)||0, a = parseFloat(aVal)||0;
     const total = h + a || 1;
     const hPct = Math.round(h/total*100);
     const aPct = 100 - hPct;
-    const hColor = h > a ? 'var(--accent)' : h < a ? 'var(--accent2)' : 'var(--text)';
-    const aColor = a > h ? 'var(--accent)' : a < h ? 'var(--accent2)' : 'var(--text)';
+    // invertColors: for fouls, fewer is better
+    const hBetter = invertColors ? h < a : h > a;
+    const aBetter = invertColors ? a < h : a > h;
+    const hColor = h===a ? 'var(--text)' : hBetter ? 'var(--accent)' : 'var(--accent2)';
+    const aColor = h===a ? 'var(--text)' : aBetter ? 'var(--accent)' : 'var(--accent2)';
+    const hDisplay = isPercent ? (hVal||'—') : (hVal||'0');
+    const aDisplay = isPercent ? (aVal||'—') : (aVal||'0');
     return `
       <div class="attack-row">
         <div class="attack-label">${label}</div>
         <div class="attack-bars">
-          <div class="attack-team">${homeLogoUrl?`<img src="${homeLogoUrl}" alt="">`:''}</div>
-          <div class="attack-val" style="color:${hColor}">${h}</div>
+          <div class="attack-val" style="color:${hColor}">${hDisplay}</div>
           <div class="attack-bar-wrap">
             <div class="attack-bar-home" style="width:${hPct}%;background:${hColor};margin-left:auto"></div>
             <div class="attack-bar-away" style="width:${aPct}%;background:${aColor}"></div>
           </div>
-          <div class="attack-val" style="color:${aColor}">${a}</div>
-          <div class="attack-team">${awayLogoUrl?`<img src="${awayLogoUrl}" alt="">`:''}</div>
+          <div class="attack-val" style="color:${aColor}">${aDisplay}</div>
         </div>
       </div>`;
   }
 
-  const attacksHTML = (hAtk||hDng) ? `
+  const hasExtraStats = hInsideBox!=null || hPassPct!=null;
+  const attacksHTML = hasExtraStats ? `
     <div class="attacks-panel">
-      <div class="section-title">Attacks</div>
-      ${hAtk!=null&&aAtk!=null ? attackBar(hAtk,aAtk,'Total Attacks',teams.home.logo,teams.away.logo) : ''}
-      ${hDng!=null&&aDng!=null ? attackBar(hDng,aDng,'Dangerous Attacks',teams.home.logo,teams.away.logo) : ''}
+      <div class="section-title">Pressure & Passing</div>
+      ${hInsideBox!=null&&aInsideBox!=null ? statBar(hInsideBox,aInsideBox,'Shots Inside Box') : ''}
+      ${hOutsideBox!=null&&aOutsideBox!=null ? statBar(hOutsideBox,aOutsideBox,'Shots Outside Box') : ''}
+      ${hFouls!=null&&aFouls!=null ? statBar(hFouls,aFouls,'Fouls',false,true) : ''}
+      ${hPassPct!=null&&aPassPct!=null ? statBar(parseInt(hPassPct),parseInt(aPassPct),'Pass Accuracy',true) : ''}
+      ${hGoalsPrev!=null&&aGoalsPrev!=null ? statBar(parseFloat(hGoalsPrev).toFixed(2),parseFloat(aGoalsPrev).toFixed(2),'Goals Prevented') : ''}
     </div>` : '';
 
   document.getElementById('center-panel').innerHTML=`
@@ -596,7 +620,7 @@ async function loadStandings() {
 
 let liveRefresh;
 loadMatches('live');
-liveRefresh=setInterval(()=>loadMatches('live'),60000);
+liveRefresh=setInterval(()=>loadMatches('live', true),60000);
 setTimeout(()=>loadStandings(),2500);
 </script>
 </body>
