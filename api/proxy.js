@@ -2,13 +2,21 @@ const https = require('https');
 const AF_KEY = '6027f198abfd437c070148bc65c2e643';
 
 const cache = {};
-const CACHE_LIVE = 30000;    // 30 сек
-const CACHE_STATIC = 300000; // 5 мин
+// Cache TTLs
+const TTL = {
+  live: 30000,       // 30s for live
+  stats: 60000,      // 1min for stats (reduces requests significantly)
+  standings: 600000, // 10min for standings
+  fixtures: 120000,  // 2min for fixture lists
+  default: 60000
+};
 
 function getCacheTTL(endpoint) {
-  if (endpoint.includes('standings') || endpoint.includes('leagues')) return CACHE_STATIC;
-  if (endpoint.includes('live')) return CACHE_LIVE;
-  return 60000; // 1 мин за останалото
+  if (endpoint.includes('live=all')) return TTL.live;
+  if (endpoint.includes('statistics')) return TTL.stats;
+  if (endpoint.includes('standings')) return TTL.standings;
+  if (endpoint.includes('fixtures')) return TTL.fixtures;
+  return TTL.default;
 }
 
 function httpsGet(url) {
@@ -20,7 +28,7 @@ function httpsGet(url) {
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         try { resolve(JSON.parse(data)); }
-        catch(e) { reject(new Error('Invalid JSON')); }
+        catch(e) { reject(new Error('JSON parse error')); }
       });
     });
     req.on('error', reject);
@@ -36,18 +44,21 @@ module.exports = async function(req, res) {
   if (!endpoint) return res.status(400).json({ error: 'Missing endpoint' });
 
   const now = Date.now();
-  if (cache[endpoint] && (now - cache[endpoint].time) < getCacheTTL(endpoint)) {
+  const ttl = getCacheTTL(endpoint);
+
+  if (cache[endpoint] && (now - cache[endpoint].time) < ttl) {
     res.setHeader('X-Cache', 'HIT');
     return res.json(cache[endpoint].data);
   }
 
   try {
-    const url = `https://v3.football.api-sports.io${endpoint}`;
-    const data = await httpsGet(url);
+    const data = await httpsGet(`https://v3.football.api-sports.io${endpoint}`);
     cache[endpoint] = { data, time: now };
     res.setHeader('X-Cache', 'MISS');
     return res.json(data);
   } catch(e) {
+    // Return cached data even if expired on error
+    if (cache[endpoint]) return res.json(cache[endpoint].data);
     return res.status(500).json({ error: e.message });
   }
 };

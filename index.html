@@ -156,6 +156,19 @@
   .placeholder-panel { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:10px; color:var(--muted); font-family:'DM Mono',monospace; font-size:10px; text-align:center; }
   .placeholder-icon { font-size:34px; opacity:0.3; }
   @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
+
+  /* Attack bars */
+  .attacks-panel { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .attack-row { margin-bottom:10px; }
+  .attack-row:last-child { margin-bottom:0; }
+  .attack-label { font-family:'DM Mono',monospace; font-size:8px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:5px; text-align:center; }
+  .attack-bars { display:flex; align-items:center; gap:6px; }
+  .attack-bar-wrap { flex:1; display:flex; flex-direction:column; gap:3px; }
+  .attack-bar-home { height:6px; border-radius:3px; transition:width 0.8s ease; min-width:2px; }
+  .attack-bar-away { height:6px; border-radius:3px; transition:width 0.8s ease; min-width:2px; }
+  .attack-val { font-family:'Bebas Neue',sans-serif; font-size:18px; line-height:1; min-width:28px; text-align:center; }
+  .attack-team { display:flex; align-items:center; justify-content:center; }
+  .attack-team img { width:20px; height:20px; object-fit:contain; }
   ::-webkit-scrollbar { width:3px; } ::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
 </style>
 </head>
@@ -455,7 +468,9 @@ async function loadMatchDetail(fixtureId) {
       <div class="event-icon ${cls}">${icon}</div>
       <div class="event-detail"><div class="event-player">${ev.player?.name||''}</div>
       <div class="event-type">${d}${ev.assist?.name?' · '+ev.assist.name:''}</div></div>
-      <div class="event-team">${(ev.team?.name||'').substring(0,3).toUpperCase()}</div>
+      <div class="event-team">
+        ${ev.team?.logo ? `<img src="${ev.team.logo}" style="width:16px;height:16px;object-fit:contain" alt="">` : (ev.team?.name||'').substring(0,3).toUpperCase()}
+      </div>
     </div>`;
   }).join(''):'<div class="empty-state" style="padding:8px 0">No events yet</div>';
 
@@ -474,6 +489,40 @@ async function loadMatchDetail(fixtureId) {
       </div>
     </div>`:'';
 
+  // Extract attacks
+  const hAtk = getStat(hS,'Attacks'); const aAtk = getStat(aS,'Attacks');
+  const hDng = getStat(hS,'Dangerous Attacks'); const aDng = getStat(aS,'Dangerous Attacks');
+
+  function attackBar(hVal, aVal, label, homeLogoUrl, awayLogoUrl) {
+    const h = parseInt(hVal)||0, a = parseInt(aVal)||0;
+    const total = h + a || 1;
+    const hPct = Math.round(h/total*100);
+    const aPct = 100 - hPct;
+    const hColor = h > a ? 'var(--accent)' : h < a ? 'var(--accent2)' : 'var(--text)';
+    const aColor = a > h ? 'var(--accent)' : a < h ? 'var(--accent2)' : 'var(--text)';
+    return `
+      <div class="attack-row">
+        <div class="attack-label">${label}</div>
+        <div class="attack-bars">
+          <div class="attack-team">${homeLogoUrl?`<img src="${homeLogoUrl}" alt="">`:''}</div>
+          <div class="attack-val" style="color:${hColor}">${h}</div>
+          <div class="attack-bar-wrap">
+            <div class="attack-bar-home" style="width:${hPct}%;background:${hColor};margin-left:auto"></div>
+            <div class="attack-bar-away" style="width:${aPct}%;background:${aColor}"></div>
+          </div>
+          <div class="attack-val" style="color:${aColor}">${a}</div>
+          <div class="attack-team">${awayLogoUrl?`<img src="${awayLogoUrl}" alt="">`:''}</div>
+        </div>
+      </div>`;
+  }
+
+  const attacksHTML = (hAtk||hDng) ? `
+    <div class="attacks-panel">
+      <div class="section-title">Attacks</div>
+      ${hAtk!=null&&aAtk!=null ? attackBar(hAtk,aAtk,'Total Attacks',teams.home.logo,teams.away.logo) : ''}
+      ${hDng!=null&&aDng!=null ? attackBar(hDng,aDng,'Dangerous Attacks',teams.home.logo,teams.away.logo) : ''}
+    </div>` : '';
+
   document.getElementById('center-panel').innerHTML=`
     <div class="match-hero">
       <div class="hero-league">${league.flag?`<img src="${league.flag}" style="width:12px;height:8px;object-fit:cover;border-radius:1px">`:''} ${league.name} · ${league.round||''}</div>
@@ -488,6 +537,7 @@ async function loadMatchDetail(fixtureId) {
       </div>
     </div>
     ${statsHTML}
+    ${attacksHTML}
     <div class="events-panel"><div class="section-title">Events</div>${evHTML}</div>`;
 }
 
@@ -496,6 +546,10 @@ async function refreshXG(fixtureId) {
   if(!stats?.response?.length) return;
   const hS=stats.response[0]?.statistics||[], aS=stats.response[1]?.statistics||[];
   const hxg=hS.find(s=>s.type==='expected_goals')?.value, axg=aS.find(s=>s.type==='expected_goals')?.value;
+  // Also refresh attacks
+  const hAtk2=hS.find(s=>s.type==='Attacks')?.value, aAtk2=aS.find(s=>s.type==='Attacks')?.value;
+  const hDng2=hS.find(s=>s.type==='Dangerous Attacks')?.value, aDng2=aS.find(s=>s.type==='Dangerous Attacks')?.value;
+  // Update attack values if visible
   if(hxg!=null&&axg!=null){
     const hv=parseFloat(hxg),av=parseFloat(axg);
     xgData[fixtureId]={h:hv,a:av};
