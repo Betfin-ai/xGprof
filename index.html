@@ -324,7 +324,7 @@ async function loadMatches(tab, silent=false) {
   }
 
   allFixtures = newFixtures;
-  if(!silent) xgData = {};
+  xgData = {};
   renderMatches();
   if(tab !== 'upcoming') fetchAllXG(allFixtures);
 }
@@ -424,7 +424,8 @@ async function fetchAllXG(fixtures) {
       if(aEl){aEl.textContent=av.toFixed(2);aEl.className='xg-val '+(av>=hv?'high':'low');}
       const card=document.querySelector(`[data-id="${f.fixture.id}"]`);
       if(card) card.classList.add('has-xg');
-      if(currentSort==='xg') renderMatches();
+      // Only re-render if xg sort AND initial load (not silent refresh)
+      if(currentSort==='xg' && !document.querySelector('.match-card.selected')) renderMatches();
     }
   }
 }
@@ -475,13 +476,20 @@ async function loadMatchDetail(fixtureId) {
   const events=f.events||[];
   const evHTML=events.length?events.slice(0,20).map(ev=>{
     let icon='⚽',cls='ei-goal';const t=ev.type,d=ev.detail||'';
+    const isGoal = t==='Goal';
     if(t==='Card'){if(d.includes('Yellow')){icon='🟨';cls='ei-yc';}else{icon='🟥';cls='ei-rc';}}
     else if(t==='subst'){icon='🔄';cls='ei-sub';}else if(t==='Var'){icon='📺';cls='ei-var';}
-    return `<div class="event-item">
-      <div class="event-min">${ev.time?.elapsed||''}'</div>
-      <div class="event-icon ${cls}">${icon}</div>
-      <div class="event-detail"><div class="event-player">${ev.player?.name||''}</div>
-      <div class="event-type">${d}${ev.assist?.name?' · '+ev.assist.name:''}</div></div>
+    const goalStyle = isGoal ? 'border-left:2px solid var(--accent);padding-left:6px;margin-left:-6px;background:rgba(0,229,160,0.04);border-radius:0 4px 4px 0;' : '';
+    const minStyle = isGoal ? 'color:var(--accent);font-size:20px;' : '';
+    const playerStyle = isGoal ? 'font-size:14px;font-weight:700;color:var(--accent);' : '';
+    const iconSize = isGoal ? 'width:28px;height:28px;font-size:16px;background:rgba(0,229,160,0.25);' : '';
+    return `<div class="event-item" style="${goalStyle}">
+      <div class="event-min" style="${minStyle}">${ev.time?.elapsed||''}'</div>
+      <div class="event-icon ${cls}" style="${iconSize}">${icon}</div>
+      <div class="event-detail">
+        <div class="event-player" style="${playerStyle}">${ev.player?.name||''}</div>
+        <div class="event-type">${d}${ev.assist?.name?' · '+ev.assist.name:''}</div>
+      </div>
       <div class="event-team">
         ${ev.team?.logo ? `<img src="${ev.team.logo}" style="width:20px;height:20px;object-fit:contain" alt="">` : (ev.team?.name||'').substring(0,3).toUpperCase()}
       </div>
@@ -507,7 +515,8 @@ async function loadMatchDetail(fixtureId) {
   const hInsideBox = getStat(hS,'Shots insidebox'); const aInsideBox = getStat(aS,'Shots insidebox');
   const hOutsideBox = getStat(hS,'Shots outsidebox'); const aOutsideBox = getStat(aS,'Shots outsidebox');
   const hPassPct = getStat(hS,'Passes %'); const aPassPct = getStat(aS,'Passes %');
-  const hGoalsPrev = getStat(hS,'goals_prevented'); const aGoalsPrev = getStat(aS,'goals_prevented');
+  const hGoalsPrev = getStat(hS,'goals_prevented');
+  const aGoalsPrev = getStat(aS,'goals_prevented');
   const hFouls = getStat(hS,'Fouls'); const aFouls = getStat(aS,'Fouls');
 
   function statBar(hVal, aVal, label, isPercent=false, invertColors=false) {
@@ -515,21 +524,26 @@ async function loadMatchDetail(fixtureId) {
     const total = h + a || 1;
     const hPct = Math.round(h/total*100);
     const aPct = 100 - hPct;
-    // invertColors: for fouls, fewer is better
     const hBetter = invertColors ? h < a : h > a;
     const aBetter = invertColors ? a < h : a > h;
     const hColor = h===a ? 'var(--text)' : hBetter ? 'var(--accent)' : 'var(--accent2)';
     const aColor = h===a ? 'var(--text)' : aBetter ? 'var(--accent)' : 'var(--accent2)';
-    const hDisplay = isPercent ? (hVal||'—') : (hVal||'0');
-    const aDisplay = isPercent ? (aVal||'—') : (aVal||'0');
+    const hDisplay = isPercent ? (hVal||'—') : (Math.round(h)||'0');
+    const aDisplay = isPercent ? (aVal||'—') : (Math.round(a)||'0');
     return `
       <div class="attack-row">
         <div class="attack-label">${label}</div>
         <div class="attack-bars">
           <div class="attack-val" style="color:${hColor}">${hDisplay}</div>
           <div class="attack-bar-wrap">
-            <div class="attack-bar-home" style="width:${hPct}%;background:${hColor};margin-left:auto"></div>
-            <div class="attack-bar-away" style="width:${aPct}%;background:${aColor}"></div>
+            <div style="display:flex;gap:2px;width:100%">
+              <div style="flex:1;display:flex;justify-content:flex-end">
+                <div class="attack-bar-home" style="width:${hPct}%;background:${hColor}"></div>
+              </div>
+              <div style="flex:1">
+                <div class="attack-bar-away" style="width:${aPct}%;background:${aColor}"></div>
+              </div>
+            </div>
           </div>
           <div class="attack-val" style="color:${aColor}">${aDisplay}</div>
         </div>
